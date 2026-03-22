@@ -46,14 +46,14 @@
     --border: #ddd9d0;
     --ink: #1a1a1a;
     --ink-dim: #555;
-    --ink-muted: #777;
-    --accent: #4a7a8a;
+    --ink-muted: #6b6b6b;
+    --accent: #3d6d7d;
     --ok: #4a7a50;
     --fail: #b04040;
-    --warn: #b08040;
+    --warn: #8b6530;
     --code-bg: rgba(0, 0, 0, 0.05);
-    --label-accent-bg: rgba(74, 122, 138, 0.1);
-    --label-warn-bg: rgba(176, 128, 64, 0.1);
+    --label-accent-bg: rgba(61, 109, 125, 0.1);
+    --label-warn-bg: rgba(139, 101, 48, 0.1);
     --label-ok-bg: rgba(74, 122, 80, 0.1);
     --label-fail-bg: rgba(176, 64, 64, 0.1);
     --result-bg: rgba(74, 122, 80, 0.04);
@@ -67,18 +67,18 @@
     --border: #333;
     --ink: #d4cdc4;
     --ink-dim: #999;
-    --ink-muted: #666;
-    --accent: #6b8f9f;
-    --ok: #6b8f71;
-    --fail: #a05050;
+    --ink-muted: #8f8f8f;
+    --accent: #77a0ae;
+    --ok: #80a886;
+    --fail: #cc7777;
     --warn: #c49b6b;
     --code-bg: rgba(0, 0, 0, 0.25);
-    --label-accent-bg: rgba(107, 143, 159, 0.15);
+    --label-accent-bg: rgba(119, 160, 174, 0.15);
     --label-warn-bg: rgba(196, 155, 107, 0.15);
-    --label-ok-bg: rgba(107, 143, 113, 0.15);
-    --label-fail-bg: rgba(160, 80, 80, 0.15);
-    --result-bg: rgba(107, 143, 113, 0.06);
-    --result-border: rgba(107, 143, 113, 0.15);
+    --label-ok-bg: rgba(128, 168, 134, 0.15);
+    --label-fail-bg: rgba(204, 119, 119, 0.15);
+    --result-bg: rgba(128, 168, 134, 0.06);
+    --result-border: rgba(128, 168, 134, 0.15);
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 }
 
@@ -138,7 +138,7 @@ header .sub { font-size: 0.6rem; color: var(--ink-muted); margin-top: 0.3rem; }
     min-height: 1.4em; text-align: right; font-variant-numeric: tabular-nums;
 }
 .wallet-bar .bal { color: var(--ink-dim); }
-.wallet-bar .addr { color: var(--ink-muted); opacity: 0.6; }
+.wallet-bar .addr { color: var(--ink-muted); }
 
 /* --- Explorer links --- */
 .explorer-link {
@@ -199,7 +199,7 @@ header .sub { font-size: 0.6rem; color: var(--ink-muted); margin-top: 0.3rem; }
     display: flex; align-items: center; justify-content: center; flex-direction: column;
     gap: 0.8rem; color: var(--ink-muted); font-size: 0.6rem; text-align: center; padding: 2rem;
 }
-.flow.empty .hint { font-size: 0.5rem; color: var(--ink-muted); opacity: 0.6; max-width: 320px; line-height: 1.6; }
+.flow.empty .hint { font-size: 0.5rem; color: var(--ink-muted); max-width: 320px; line-height: 1.6; }
 .flow .step {
     opacity: 0; transform: translateY(6px); animation: step-in 0.3s ease forwards;
     margin-bottom: 0.8rem; padding-bottom: 0.8rem; border-bottom: 1px solid var(--border);
