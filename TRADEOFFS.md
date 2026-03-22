@@ -6,7 +6,7 @@ Decisions made for the current version with notes on what to improve later.
 
 - **x402 v2**: Full implementation via `x402-axum` middleware on both Base Sepolia (testnet) and Base (mainnet). Payment signing and settlement require a funded wallet with USDC.
 
-- **MPP**: Full implementation of IETF `draft-ryan-httpauth-payment` with Tempo `method`. Server returns `WWW-Authenticate: Payment` challenges, verifies `Authorization: Payment` credentials, and checks transaction receipts directly on Tempo chain via RPC. ~625 lines of manual implementation (RLP encoding, JSON-RPC, ERC-20 calldata, HMAC challenge binding, receipt parsing) since the mpp-rs SDK was too new to depend on.
+- **MPP**: Full implementation of IETF `draft-ryan-httpauth-payment` with Tempo `method`. Server returns `WWW-Authenticate: Payment` challenges, verifies `Authorization: Payment` credentials, and checks transaction receipts directly on Tempo chain via RPC. ~640 lines of manual implementation (RLP encoding, JSON-RPC, ERC-20 calldata, HMAC challenge binding, receipt parsing) since the mpp-rs SDK was too new to depend on.
 
 ## Payment Flow
 
