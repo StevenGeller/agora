@@ -24,7 +24,6 @@
 <meta name="twitter:site" content="@steven_geller">
 <meta name="twitter:creator" content="@steven_geller">
 <script>
-// Set theme before paint to prevent flash
 (function() {
     var saved = localStorage.getItem('agora-theme');
     var theme = saved || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
@@ -41,7 +40,6 @@
 
 *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
-/* --- Light theme (default) --- */
 :root, [data-theme="light"] {
     --bg: #f5f4f0;
     --surface: #ffffff;
@@ -63,7 +61,6 @@
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
-/* --- Dark theme --- */
 [data-theme="dark"] {
     --bg: #181818;
     --surface: #1e1e1e;
@@ -95,306 +92,137 @@ body {
     transition: background-color 0.2s, color 0.2s;
 }
 
-.container {
-    max-width: 960px;
-    margin: 0 auto;
-    padding: 2.5rem 1.5rem;
-}
+.container { max-width: 960px; margin: 0 auto; padding: 2.5rem 1.5rem; }
 
 /* --- Header --- */
-header {
-    text-align: center;
-    margin-bottom: 2.5rem;
-    position: relative;
-}
-
-header h1 {
-    font-size: 1.2rem;
-    font-weight: 400;
-    letter-spacing: 0.18em;
-    text-transform: uppercase;
-    color: var(--ink);
-}
-
-header .why {
-    font-size: 0.75rem;
-    color: var(--ink);
-    margin-top: 0.8rem;
-    letter-spacing: 0.02em;
-}
-
-header .sub {
-    font-size: 0.6rem;
-    color: var(--ink-muted);
-    margin-top: 0.3rem;
-}
-
-header .proto {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.5rem;
-    margin-top: 0.8rem;
-    font-size: 0.55rem;
-    color: var(--ink-dim);
-    letter-spacing: 0.04em;
-}
-
-header .proto .dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--accent);
-}
+header { text-align: center; margin-bottom: 2.5rem; position: relative; }
+header h1 { font-size: 1.2rem; font-weight: 400; letter-spacing: 0.18em; text-transform: uppercase; }
+header .why { font-size: 0.75rem; margin-top: 0.8rem; letter-spacing: 0.02em; }
+header .sub { font-size: 0.6rem; color: var(--ink-muted); margin-top: 0.3rem; }
 
 /* --- Theme toggle --- */
 .theme-toggle {
-    position: absolute;
-    top: 0;
-    right: 0;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    color: var(--ink-muted);
-    font-family: inherit;
-    font-size: 0.55rem;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-    padding: 0.3rem 0.6rem;
-    cursor: pointer;
-    transition: border-color 0.15s, color 0.15s;
+    position: absolute; top: 0; right: 0;
+    background: transparent; border: 1px solid var(--border); border-radius: 3px;
+    color: var(--ink-muted); font-family: inherit; font-size: 0.55rem;
+    letter-spacing: 0.04em; text-transform: uppercase;
+    padding: 0.3rem 0.6rem; cursor: pointer; transition: border-color 0.15s, color 0.15s;
 }
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+.theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.theme-toggle:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-}
-
-.theme-toggle:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-}
-
-/* --- Controls bar (toggle + wallet) --- */
+/* --- Controls bar --- */
 .controls {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-    margin-bottom: 1.2rem;
-    flex-wrap: wrap;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 1rem; margin-bottom: 0.6rem; flex-wrap: wrap;
 }
 
 /* --- Protocol toggle --- */
-.toggle {
-    display: flex;
-    gap: 0;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    width: fit-content;
-}
-
+.toggle { display: flex; gap: 0; border: 1px solid var(--border); border-radius: 3px; width: fit-content; }
 .toggle-btn {
-    background: transparent;
-    border: none;
-    color: var(--ink-muted);
-    font-family: inherit;
-    font-size: 0.6rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    padding: 0.45rem 1.2rem;
-    cursor: pointer;
-    transition: all 0.15s;
+    background: transparent; border: none; color: var(--ink-muted);
+    font-family: inherit; font-size: 0.6rem; letter-spacing: 0.06em;
+    text-transform: uppercase; padding: 0.45rem 1.2rem; cursor: pointer; transition: all 0.15s;
 }
-
 .toggle-btn + .toggle-btn { border-left: 1px solid var(--border); }
-
-.toggle-btn:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: -2px;
-}
-
-.toggle-btn.active {
-    background: var(--accent);
-    color: #fff;
-}
-
-[data-theme="dark"] .toggle-btn.active {
-    color: var(--bg);
-}
-
-.toggle-btn[data-proto="x402-mainnet"].active {
-    background: var(--ok);
-}
-
-.toggle-btn[data-proto="mpp"].active {
-    background: var(--warn);
-}
+.toggle-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.toggle-btn.active { background: var(--accent); color: #fff; }
+[data-theme="dark"] .toggle-btn.active { color: var(--bg); }
+.toggle-btn[data-proto="x402-mainnet"].active { background: var(--ok); }
+.toggle-btn[data-proto="mpp-testnet"].active,
+.toggle-btn[data-proto="mpp-mainnet"].active { background: var(--warn); }
 
 /* --- Wallet balance --- */
 .wallet-bar {
-    font-size: 0.55rem;
-    color: var(--ink-muted);
-    letter-spacing: 0.02em;
-    min-height: 1.4em;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
+    font-size: 0.55rem; color: var(--ink-muted); letter-spacing: 0.02em;
+    min-height: 1.4em; text-align: right; font-variant-numeric: tabular-nums;
 }
+.wallet-bar .bal { color: var(--ink-dim); }
+.wallet-bar .addr { color: var(--ink-muted); opacity: 0.6; }
 
-.wallet-bar .bal {
-    color: var(--ink-dim);
+/* --- Explorer links --- */
+.explorer-link {
+    color: var(--accent); text-decoration: none; border-bottom: 1px dashed var(--border);
+    word-break: break-all; transition: color 0.15s;
 }
+.explorer-link:hover { color: var(--ink); }
+.explorer-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.wallet-bar .addr {
-    color: var(--ink-muted);
-    opacity: 0.6;
+/* --- Protocol explainer --- */
+.proto-explainer {
+    font-size: 0.55rem; color: var(--ink-muted); line-height: 1.7;
+    margin-bottom: 1.2rem; padding: 0.6rem 0.8rem;
+    background: var(--code-bg); border-radius: 3px;
+    transition: opacity 0.15s;
+}
+.proto-explainer strong { color: var(--ink-dim); }
+
+/* --- Balance warning --- */
+.balance-warn {
+    font-size: 0.5rem; color: var(--warn); margin-top: 0.3rem;
+    text-align: right; letter-spacing: 0.02em;
 }
 
 /* --- Cards grid --- */
-.cards {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 1rem;
-    margin-bottom: 2rem;
-}
-
+.cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; margin-bottom: 2rem; }
 .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 1.2rem 1rem;
-    display: flex;
-    flex-direction: column;
-    box-shadow: var(--shadow);
-    transition: border-color 0.15s, box-shadow 0.15s;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+    padding: 1.2rem 1rem; display: flex; flex-direction: column;
+    box-shadow: var(--shadow); transition: border-color 0.15s, box-shadow 0.15s;
 }
-
-.card:hover {
-    border-color: var(--accent);
-}
-
-.card h2 {
-    font-size: 0.7rem;
-    font-weight: 400;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--accent);
-    margin-bottom: 0.5rem;
-}
-
-.card .desc {
-    font-size: 0.6rem;
-    color: var(--ink-muted);
-    flex: 1;
-    margin-bottom: 1rem;
-    line-height: 1.6;
-}
-
-.card .price {
-    font-size: 0.5rem;
-    color: var(--ink-dim);
-    margin-bottom: 0.8rem;
-    font-variant-numeric: tabular-nums;
-}
-
+.card:hover { border-color: var(--accent); }
+.card h2 { font-size: 0.7rem; font-weight: 400; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin-bottom: 0.5rem; }
+.card .desc { font-size: 0.6rem; color: var(--ink-muted); flex: 1; margin-bottom: 1rem; line-height: 1.6; }
+.card .price { font-size: 0.5rem; color: var(--ink-dim); margin-bottom: 0.8rem; font-variant-numeric: tabular-nums; }
 .card button {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--ink);
-    font-family: inherit;
-    font-size: 0.6rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    padding: 0.5rem 1rem;
-    border-radius: 3px;
-    cursor: pointer;
-    transition: border-color 0.15s, color 0.15s;
+    background: transparent; border: 1px solid var(--border); color: var(--ink);
+    font-family: inherit; font-size: 0.6rem; letter-spacing: 0.06em;
+    text-transform: uppercase; padding: 0.5rem 1rem; border-radius: 3px;
+    cursor: pointer; transition: border-color 0.15s, color 0.15s;
 }
-
-.card button:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-}
-
-.card button:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-}
-
-.card button:disabled {
-    opacity: 0.4;
-    cursor: default;
-}
-
-.card button:disabled:hover {
-    border-color: var(--border);
-    color: var(--ink);
-}
+.card button:hover { border-color: var(--accent); color: var(--accent); }
+.card button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.card button:disabled { opacity: 0.4; cursor: default; }
+.card button:disabled:hover { border-color: var(--border); color: var(--ink); }
 
 /* --- Flow panel --- */
 .flow-header {
-    font-size: 0.7rem;
-    font-weight: 400;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--ink-muted);
-    margin-bottom: 0.6rem;
+    font-size: 0.7rem; font-weight: 400; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ink-muted); margin-bottom: 0.6rem;
+    display: flex; align-items: center; gap: 0.5rem;
 }
-
 .flow {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 1.2rem;
-    min-height: 200px;
-    box-shadow: var(--shadow);
+    background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+    padding: 1.2rem; min-height: 200px; box-shadow: var(--shadow);
 }
-
 .flow.empty {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--ink-muted);
-    font-size: 0.6rem;
+    display: flex; align-items: center; justify-content: center; flex-direction: column;
+    gap: 0.8rem; color: var(--ink-muted); font-size: 0.6rem; text-align: center; padding: 2rem;
 }
-
+.flow.empty .hint { font-size: 0.5rem; color: var(--ink-muted); opacity: 0.6; max-width: 320px; line-height: 1.6; }
 .flow .step {
-    opacity: 0;
-    transform: translateY(6px);
-    animation: step-in 0.3s ease forwards;
-    margin-bottom: 0.8rem;
-    padding-bottom: 0.8rem;
-    border-bottom: 1px solid var(--border);
+    opacity: 0; transform: translateY(6px); animation: step-in 0.3s ease forwards;
+    margin-bottom: 0.8rem; padding-bottom: 0.8rem; border-bottom: 1px solid var(--border);
 }
-
-.flow .step:last-child {
-    border-bottom: none;
-    margin-bottom: 0;
-    padding-bottom: 0;
-}
-
+.flow .step:last-child { border-bottom: none; margin-bottom: 0; padding-bottom: 0; }
 @media (prefers-reduced-motion: reduce) {
-    .flow .step {
-        animation: none;
-        opacity: 1;
-        transform: none;
-    }
+    .flow .step { animation: none; opacity: 1; transform: none; }
+}
+@keyframes step-in { to { opacity: 1; transform: translateY(0); } }
+
+/* --- Loading pulse --- */
+@keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 1; } }
+.loading-dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); animation: pulse 1s ease-in-out infinite;
 }
 
-@keyframes step-in {
-    to { opacity: 1; transform: translateY(0); }
-}
-
+/* --- Step labels --- */
 .step-label {
-    display: inline-block;
-    font-size: 0.55rem;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    padding: 2px 6px;
-    border-radius: 2px;
-    margin-bottom: 0.4rem;
+    display: inline-block; font-size: 0.55rem; font-weight: 600;
+    letter-spacing: 0.06em; text-transform: uppercase;
+    padding: 2px 6px; border-radius: 2px; margin-bottom: 0.4rem;
 }
-
 .step-label.request { background: var(--label-accent-bg); color: var(--accent); }
 .step-label.s402 { background: var(--label-warn-bg); color: var(--warn); }
 .step-label.sign { background: var(--label-accent-bg); color: var(--accent); }
@@ -404,81 +232,40 @@ header .proto .dot {
 .step-label.s200 { background: var(--label-ok-bg); color: var(--ok); }
 .step-label.error { background: var(--label-fail-bg); color: var(--fail); }
 
-.step-detail {
-    font-size: 0.6rem;
-    color: var(--ink-dim);
-    margin-top: 0.2rem;
-}
-
+.step-desc { font-size: 0.55rem; color: var(--ink-muted); margin-top: 0.15rem; font-style: italic; }
+.step-detail { font-size: 0.6rem; color: var(--ink-dim); margin-top: 0.2rem; }
 .step-payload {
-    margin-top: 0.4rem;
-    background: var(--code-bg);
-    border-radius: 3px;
-    padding: 0.5rem 0.7rem;
-    font-size: 0.55rem;
-    color: var(--ink-muted);
-    line-height: 1.7;
-    overflow-x: auto;
-    white-space: pre-wrap;
-    word-break: break-all;
-    max-height: 180px;
-    overflow-y: auto;
+    margin-top: 0.4rem; background: var(--code-bg); border-radius: 3px;
+    padding: 0.5rem 0.7rem; font-size: 0.55rem; color: var(--ink-muted);
+    line-height: 1.7; overflow-x: auto; white-space: pre-wrap;
+    word-break: break-all; max-height: 180px; overflow-y: auto;
 }
-
 .step-payload::-webkit-scrollbar { width: 3px; height: 3px; }
 .step-payload::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
-
 .step-result {
-    margin-top: 0.6rem;
-    padding: 0.8rem;
-    background: var(--result-bg);
-    border: 1px solid var(--result-border);
-    border-radius: 3px;
-    font-size: 0.65rem;
-    line-height: 1.8;
-    color: var(--ink);
-    white-space: pre-wrap;
+    margin-top: 0.6rem; padding: 0.8rem;
+    background: var(--result-bg); border: 1px solid var(--result-border);
+    border-radius: 3px; font-size: 0.65rem; line-height: 1.8;
+    color: var(--ink); white-space: pre-wrap;
 }
-
 .flow-elapsed {
-    margin-top: 0.6rem;
-    font-size: 0.55rem;
-    color: var(--ink-muted);
-    text-align: right;
-    font-variant-numeric: tabular-nums;
+    margin-top: 0.6rem; font-size: 0.55rem; color: var(--ink-muted);
+    text-align: right; font-variant-numeric: tabular-nums;
 }
 
 /* --- Footer --- */
-footer {
-    text-align: center;
-    padding: 2rem;
-    font-size: 0.55rem;
-    color: var(--ink-muted);
-}
-
-footer a {
-    color: var(--ink-muted);
-    text-decoration: none;
-    border-bottom: 1px dashed var(--border);
-    transition: color 0.15s;
-}
-
-footer a:hover {
-    color: var(--accent);
-}
-
-footer a:focus-visible {
-    outline: 2px solid var(--accent);
-    outline-offset: 2px;
-}
+footer { text-align: center; padding: 2rem; font-size: 0.55rem; color: var(--ink-muted); }
+footer a { color: var(--ink-muted); text-decoration: none; border-bottom: 1px dashed var(--border); transition: color 0.15s; }
+footer a:hover { color: var(--accent); }
+footer a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* --- Responsive --- */
 @media (max-width: 768px) {
     .cards { grid-template-columns: repeat(2, 1fr); }
     .controls { flex-direction: column; align-items: flex-start; }
     .wallet-bar { text-align: left; }
+    .balance-warn { text-align: left; }
 }
-
 @media (max-width: 480px) {
     .cards { grid-template-columns: 1fr; }
     .toggle-btn { padding: 0.45rem 0.8rem; font-size: 0.55rem; }
@@ -493,54 +280,54 @@ footer a:focus-visible {
     <h1>Agora</h1>
     <div class="why">Machines will pay machines. These are the two protocols fighting to own that flow.</div>
     <div class="sub">x402 (Coinbase, crypto-native) vs MPP (Stripe, fiat-native) &mdash; side by side, real on-chain settlement</div>
-    <div class="proto">
-        <span class="dot"></span>
-        x402 (Coinbase) &middot; Base Sepolia &middot; USDC &middot; 0.001 per call
-    </div>
-    <div class="proto">
-        <span class="dot" style="background: var(--warn)"></span>
-        MPP (Stripe / Tempo) &middot; Tempo Moderato &middot; pathUSD &middot; 0.001 per call
-    </div>
 </header>
 
 <div class="controls">
     <div class="toggle">
-        <button class="toggle-btn active" data-proto="x402-testnet">x402</button>
-        <button class="toggle-btn" data-proto="mpp">MPP</button>
+        <button class="toggle-btn active" data-proto="x402-testnet">x402 testnet</button>
+        <button class="toggle-btn" data-proto="x402-mainnet">x402 mainnet</button>
+        <button class="toggle-btn" data-proto="mpp-testnet">MPP testnet</button>
+        <button class="toggle-btn" data-proto="mpp-mainnet">MPP mainnet</button>
     </div>
-    <div class="wallet-bar" id="wallet-bar"></div>
+    <div>
+        <div class="wallet-bar" id="wallet-bar"></div>
+        <div class="balance-warn" id="balance-warn"></div>
+    </div>
 </div>
+
+<div class="proto-explainer" id="proto-explainer"></div>
 
 <div class="cards">
     <div class="card">
         <h2>Haiku</h2>
         <div class="desc">A random haiku about technology, systems, and code.</div>
-        <div class="price">0.000001 USDC</div>
+        <div class="price" data-price>0.001 USDC</div>
         <button data-endpoint="haiku">Purchase</button>
     </div>
     <div class="card">
         <h2>Quote</h2>
         <div class="desc">A curated quote from the history of computing.</div>
-        <div class="price">0.000001 USDC</div>
+        <div class="price" data-price>0.001 USDC</div>
         <button data-endpoint="quote">Purchase</button>
     </div>
     <div class="card">
         <h2>Fact</h2>
         <div class="desc">A random technical fact about science and engineering.</div>
-        <div class="price">0.000001 USDC</div>
+        <div class="price" data-price>0.001 USDC</div>
         <button data-endpoint="fact">Purchase</button>
     </div>
     <div class="card">
         <h2>Torus</h2>
         <div class="desc">A logographic symbol from the Torus constructed language.</div>
-        <div class="price">0.000001 USDC</div>
+        <div class="price" data-price>0.001 USDC</div>
         <button data-endpoint="torus">Purchase</button>
     </div>
 </div>
 
-<div class="flow-header" id="flow-header">x402 Handshake</div>
+<div class="flow-header" id="flow-header">x402 v2 Handshake (Base Sepolia)</div>
 <div class="flow empty" id="flow">
-    Select a protocol and click purchase to see the payment flow
+    <span>Click purchase to watch the payment handshake in real time</span>
+    <span class="hint">Every click fires a real on-chain transaction. You'll see each step from initial request through payment to content delivery.</span>
 </div>
 
 </div>

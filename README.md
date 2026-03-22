@@ -10,21 +10,25 @@ Live at [agora.steven-geller.com](https://agora.steven-geller.com)
 
 Agora serves four micro-endpoints (haiku, quote, fact, torus glyph) behind HTTP 402 paywalls. Each endpoint is available through both payment protocols, so you can compare the handshake flows side by side.
 
-The web UI walks through every step of each protocol's 402 challenge-response cycle, from initial request through payment signing to content delivery.
+The web UI walks through every step of each protocol's challenge-response cycle, from initial request through payment to content delivery. Every transaction settles on a real blockchain.
 
 ### x402 (Coinbase)
 
 Full [x402 v2](https://www.x402.org) implementation using the official `x402-axum` middleware. Payments settle on-chain via ERC-3009 `TransferWithAuthorization` on Base (USDC), verified by the x402.org facilitator.
+
+The server returns a 402 with a proprietary `Payment-Required` header containing a base64-encoded JSON blob. The client constructs a `Payment-Signature` header with a signed EIP-712 payload and retries.
 
 - Testnet: `/test/*` (Base Sepolia, eip155:84532)
 - Mainnet: `/api/*` (Base, eip155:8453)
 
 ### MPP (Stripe / IETF)
 
-Implementation of the [Machine Payments Protocol](https://mpp.dev) per IETF [draft-ryan-httpauth-payment](https://datatracker.ietf.org/doc/draft-ryan-httpauth-payment/). Payments settle on Tempo L1 using pathUSD, with on-chain receipt verification.
+Implementation of the [Machine Payments Protocol](https://mpp.dev) per IETF [draft-ryan-httpauth-payment](https://datatracker.ietf.org/doc/draft-ryan-httpauth-payment/). Payments settle on Tempo using pathUSD, with on-chain receipt verification.
 
-- Endpoints: `/mpp/*`
-- Settlement: Tempo Moderato chain (eip155:42431)
+The server returns a 402 with a standard `WWW-Authenticate: Payment` header containing an HMAC-bound challenge. The client sends a real on-chain pathUSD transfer, then retries with an `Authorization: Payment` credential containing the transaction hash as proof. The server verifies the receipt directly on-chain, no facilitator needed.
+
+- Testnet: `/mpp/*` (Tempo Moderato, chain 42431)
+- Mainnet: `/mpp-mainnet/*` (Tempo, chain 4217)
 
 ## Architecture
 
@@ -37,24 +41,25 @@ Implementation of the [Machine Payments Protocol](https://mpp.dev) per IETF [dra
                          ┌──────────▼──────────────────┐
                          │     Axum server (:3033)      │
                          │                              │
-                         │  /test/*  x402 testnet       │
-                         │  /api/*   x402 mainnet       │
-                         │  /mpp/*   MPP (Tempo)        │
-                         │  /demo/*  buyer proxy        │
+                         │  /test/*        x402 testnet │
+                         │  /api/*         x402 mainnet │
+                         │  /mpp/*         MPP testnet  │
+                         │  /mpp-mainnet/* MPP mainnet  │
+                         │  /demo/*        buyer proxy  │
                          │  /.well-known/x402 discovery │
                          └──────────┬──────────────────┘
                                     │
               ┌─────────────────────┼─────────────────────┐
               │                     │                     │
     ┌─────────▼────────┐ ┌─────────▼────────┐ ┌──────────▼───────┐
-    │ x402.org         │ │ Base Sepolia /   │ │ Tempo Moderato   │
-    │ facilitator      │ │ Base mainnet     │ │ RPC              │
+    │ x402.org         │ │ Base Sepolia /   │ │ Tempo Moderato / │
+    │ facilitator      │ │ Base mainnet     │ │ Tempo mainnet    │
     └──────────────────┘ └──────────────────┘ └──────────────────┘
 ```
 
 **`src/main.rs`** — Axum server, x402 middleware integration, demo buyer proxy, content endpoints, rate limiting
 
-**`src/mpp.rs`** — MPP protocol: HMAC-bound challenge generation, credential verification, on-chain receipt validation, RLP-encoded Tempo transactions
+**`src/mpp.rs`** — MPP protocol: HMAC-bound challenge generation via `WWW-Authenticate: Payment`, credential verification via `Authorization: Payment`, on-chain receipt validation, RLP-encoded Tempo transactions
 
 **`static/`** — Single-page frontend with step-by-step flow visualization
 
@@ -127,7 +132,17 @@ Returns JSON with supported protocols, networks, endpoints, and pricing.
 | `GET /test/fact` | x402 v2 (testnet) | Technical fact |
 | `GET /test/torus` | x402 v2 (testnet) | Torus logographic symbol |
 | `GET /api/haiku` | x402 v2 (mainnet) | Same content, real USDC |
-| `GET /mpp/haiku` | MPP (Tempo) | Same content, pathUSD |
+| `GET /api/quote` | x402 v2 (mainnet) | Same content, real USDC |
+| `GET /api/fact` | x402 v2 (mainnet) | Same content, real USDC |
+| `GET /api/torus` | x402 v2 (mainnet) | Same content, real USDC |
+| `GET /mpp/haiku` | MPP (testnet) | Same content, pathUSD |
+| `GET /mpp/quote` | MPP (testnet) | Same content, pathUSD |
+| `GET /mpp/fact` | MPP (testnet) | Same content, pathUSD |
+| `GET /mpp/torus` | MPP (testnet) | Same content, pathUSD |
+| `GET /mpp-mainnet/haiku` | MPP (mainnet) | Same content, real pathUSD |
+| `GET /mpp-mainnet/quote` | MPP (mainnet) | Same content, real pathUSD |
+| `GET /mpp-mainnet/fact` | MPP (mainnet) | Same content, real pathUSD |
+| `GET /mpp-mainnet/torus` | MPP (mainnet) | Same content, real pathUSD |
 
 All endpoints return JSON. Without payment, they return HTTP 402 with protocol-specific challenge headers.
 
@@ -141,10 +156,10 @@ curl -s -X POST https://agora.steven-geller.com/demo/purchase \
   -H 'Content-Type: application/json' \
   -d '{"endpoint":"haiku","protocol":"x402-testnet"}'
 
-# MPP
+# MPP testnet
 curl -s -X POST https://agora.steven-geller.com/demo/purchase \
   -H 'Content-Type: application/json' \
-  -d '{"endpoint":"haiku","protocol":"mpp"}'
+  -d '{"endpoint":"haiku","protocol":"mpp-testnet"}'
 ```
 
 Returns the full step-by-step handshake as JSON.
@@ -160,11 +175,14 @@ See [agents.txt](static/agents.txt) (also served at `/agents.txt`) for the machi
 | | x402 v2 | MPP |
 |---|---|---|
 | **Spec** | [x402.org](https://www.x402.org) | [IETF draft-ryan-httpauth-payment](https://datatracker.ietf.org/doc/draft-ryan-httpauth-payment/) |
-| **402 header** | `Payment-Required` (base64 JSON) | `WWW-Authenticate: Payment` (RFC 9110 auth params) |
+| **402 header** | `Payment-Required` (base64 JSON, proprietary) | `WWW-Authenticate: Payment` (RFC 9110 auth params) |
 | **Client header** | `Payment-Signature` (base64 payload) | `Authorization: Payment` (base64url credential) |
 | **Receipt** | `X-Payment-Response` | `Payment-Receipt` |
-| **Settlement** | On-chain ERC-3009 (Base USDC) | On-chain TIP-20 transfer (Tempo pathUSD) |
+| **Settlement** | Facilitator settles on-chain (Base USDC) | Client settles directly on-chain (Tempo pathUSD) |
+| **Verification** | Delegated to facilitator | Server verifies on-chain receipt directly |
 | **Identity** | Wallet address | DID / wallet address |
+| **Challenge binding** | None (facilitator tracks nonces) | HMAC-SHA256 bound to server |
+| **Replay protection** | Facilitator-managed | Server-side consumed tx hash set |
 | **Rust SDK** | [x402-rs](https://github.com/coinbase/x402) (mature) | [mpp-rs](https://github.com/tempoxyz/mpp-rs) (new) |
 | **JS SDK** | [@x402/fetch](https://www.npmjs.com/package/@x402/fetch) (mature) | [mppx](https://www.npmjs.com/package/mppx) (new) |
 
