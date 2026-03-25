@@ -23,8 +23,6 @@ Decisions made for the current version with notes on what to improve later.
 
 ## Security
 
-- **Replay protection is in-memory**: Consumed transaction hashes are stored in a `HashSet` in memory. If the server restarts, the hash set resets. On testnet this is acceptable. On mainnet with real value, this should be persisted to disk or a database.
-
 - **Rate limiting is global**: The sliding window rate limiter (20 purchases/min, 60 balance checks/min) is per-server, not per-IP. Behind Cloudflare/Caddy, this is supplemented by Caddy's per-IP rate limiting on the reverse proxy.
 
 ## MPP-Specific

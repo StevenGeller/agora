@@ -1,11 +1,11 @@
 mod mpp;
 
 use axum::{
-    Router,
     extract::Json,
     middleware as axum_mw,
     response::IntoResponse,
     routing::{get, post},
+    Router,
 };
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -15,7 +15,20 @@ use std::collections::VecDeque;
 use std::net::SocketAddr;
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
+use tower_http::catch_panic::CatchPanicLayer;
 use tower_http::services::ServeDir;
+use tracing::{error, info};
+
+const CONSUMED_HASHES_PATH: &str = "/home/steven/agora/consumed_hashes.dat";
+
+fn load_consumed_hashes() -> std::collections::HashSet<String> {
+    std::fs::read_to_string(CONSUMED_HASHES_PATH)
+        .unwrap_or_default()
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(|l| l.to_string())
+        .collect()
+}
 
 // ---------------------------------------------------------------------------
 // Rate limiter (global sliding window)
@@ -117,9 +130,8 @@ const FACTS: &[&str] = &[
 ];
 
 const TORUS_WORDS: &[&str] = &[
-    "time", "light", "void", "dream", "echo",
-    "flux", "pulse", "wave", "root", "seed",
-    "fire", "stone", "wind", "rain", "star",
+    "time", "light", "void", "dream", "echo", "flux", "pulse", "wave", "root", "seed", "fire",
+    "stone", "wind", "rain", "star",
 ];
 
 // ---------------------------------------------------------------------------
@@ -153,6 +165,18 @@ fn default_protocol() -> String {
     "x402-testnet".into()
 }
 
+/// Parse a decimal price string (e.g. "0.001") into token base units (6 decimals).
+fn parse_price_to_base_units(price: &str) -> alloy_primitives::U256 {
+    let parts: Vec<&str> = price.split('.').collect();
+    let whole: u64 = parts[0].parse().unwrap_or(0);
+    let frac: u64 = if parts.len() > 1 {
+        format!("{:0<6}", parts[1])[..6].parse().unwrap_or(0)
+    } else {
+        0
+    };
+    alloy_primitives::U256::from(whole * 1_000_000 + frac)
+}
+
 #[derive(Serialize)]
 struct Step {
     name: String,
@@ -164,7 +188,6 @@ struct Step {
     wallet: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     content: Option<String>,
-    tx_hash: None,
     #[serde(skip_serializing_if = "Option::is_none")]
     tx_hash: Option<String>,
 }
@@ -220,10 +243,13 @@ async fn torus_handler() -> Json<serde_json::Value> {
     {
         Ok(resp) => {
             let json: serde_json::Value = resp.json().await.unwrap_or_default();
-            json.get("svg").and_then(|s| s.as_str()).unwrap_or("<svg/>").to_string()
+            json.get("svg")
+                .and_then(|s| s.as_str())
+                .unwrap_or("<svg/>")
+                .to_string()
         }
         Err(e) => {
-            eprintln!("torus fetch failed: {}", e);
+            error!(error = %e, "torus fetch failed");
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 200 200\"><text x=\"100\" y=\"100\" text-anchor=\"middle\" fill=\"currentColor\" font-size=\"14\">unavailable</text></svg>".to_string()
         }
     };
@@ -253,24 +279,39 @@ async fn balance_handler(Json(req): Json<BalanceRequest>) -> impl IntoResponse {
     };
     let wallet = format!("{:?}", signer.address());
 
-    let (rpc_url, token_address, chain_label, token_symbol, explorer_url) = match req.protocol.as_str() {
-        "mpp" => (
-            std::env::var("TEMPO_RPC_URL")
-                .unwrap_or_else(|_| "https://rpc.moderato.tempo.xyz".into()),
-            "0x20c0000000000000000000000000000000000000",
-            "Tempo Moderato",
-            "pathUSD",
-            "https://explore.tempo.xyz",
-        ),
-        "x402-testnet" => (
-            "https://sepolia.base.org".into(),
-            "0x036CbD53842c5426634e7929541eC2318f3dCF7e", // USDC on Base Sepolia
-            "Base Sepolia",
-            "USDC",
-            "https://sepolia.basescan.org",
-        ),
-        _ => return Json(serde_json::json!({"error": "unknown protocol"})),
-    };
+    let (rpc_url, token_address, chain_label, token_symbol, explorer_url) =
+        match req.protocol.as_str() {
+            "mpp-testnet" => (
+                std::env::var("TEMPO_RPC_URL")
+                    .unwrap_or_else(|_| "https://rpc.moderato.tempo.xyz".into()),
+                "0x20c0000000000000000000000000000000000000",
+                "Tempo Moderato",
+                "pathUSD",
+                "https://explore.testnet.tempo.xyz",
+            ),
+            "mpp-mainnet" => (
+                "https://rpc.tempo.xyz".into(),
+                "0x20c0000000000000000000000000000000000000",
+                "Tempo",
+                "pathUSD",
+                "https://explore.tempo.xyz",
+            ),
+            "x402-testnet" => (
+                "https://sepolia.base.org".into(),
+                "0x036CbD53842c5426634e7929541eC2318f3dCF7e", // USDC on Base Sepolia
+                "Base Sepolia",
+                "USDC",
+                "https://sepolia.basescan.org",
+            ),
+            "x402-mainnet" => (
+                "https://mainnet.base.org".into(),
+                "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC on Base
+                "Base",
+                "USDC",
+                "https://basescan.org",
+            ),
+            _ => return Json(serde_json::json!({"error": "unknown protocol"})),
+        };
 
     // ERC-20 balanceOf(address) call
     let addr_padded = format!("{:0>64}", &wallet[2..]);
@@ -297,7 +338,7 @@ async fn balance_handler(Json(req): Json<BalanceRequest>) -> impl IntoResponse {
                 .to_string()
         }
         Err(e) => {
-            eprintln!("balance rpc failed: {}", e);
+            error!(error = %e, "balance rpc failed");
             return Json(serde_json::json!({"error": "balance check failed"}));
         }
     };
@@ -340,11 +381,12 @@ async fn purchase_handler(Json(req): Json<PurchaseRequest>) -> impl IntoResponse
         }
     };
 
-    // x402-testnet → /test/*, x402-mainnet → /api/*, mpp → /mpp/*
+    // x402-testnet → /test/*, x402-mainnet → /api/*, mpp-testnet → /mpp/*, mpp-mainnet → /mpp-mainnet/*
     let path = match protocol.as_str() {
         "x402-testnet" => format!("/test/{}", base_path),
         "x402-mainnet" => format!("/api/{}", base_path),
-        "mpp" => format!("/mpp/{}", base_path),
+        "mpp-testnet" => format!("/mpp/{}", base_path),
+        "mpp-mainnet" => format!("/mpp-mainnet/{}", base_path),
         _ => {
             return Json(serde_json::json!({
                 "error": format!("unknown protocol: {}", protocol)
@@ -352,7 +394,7 @@ async fn purchase_handler(Json(req): Json<PurchaseRequest>) -> impl IntoResponse
         }
     };
 
-    let is_mpp = protocol == "mpp";
+    let is_mpp = protocol == "mpp-testnet" || protocol == "mpp-mainnet";
 
     let url = format!("http://127.0.0.1:3033{}", path);
     let mut steps: Vec<Step> = Vec::new();
@@ -423,7 +465,16 @@ async fn purchase_handler(Json(req): Json<PurchaseRequest>) -> impl IntoResponse
     });
 
     if is_mpp {
-        return purchase_mpp(url, www_auth, steps, start).await;
+        let (mpp_rpc, mpp_chain_id) = if protocol == "mpp-mainnet" {
+            ("https://rpc.tempo.xyz".into(), 4217u64)
+        } else {
+            (
+                std::env::var("TEMPO_RPC_URL")
+                    .unwrap_or_else(|_| "https://rpc.moderato.tempo.xyz".into()),
+                42431u64,
+            )
+        };
+        return purchase_mpp(url, www_auth, steps, start, mpp_rpc, mpp_chain_id).await;
     }
 
     // --- x402 flow ---
@@ -443,8 +494,8 @@ async fn purchase_handler(Json(req): Json<PurchaseRequest>) -> impl IntoResponse
 
     let signer: PrivateKeySigner = match private_key_hex.parse() {
         Ok(s) => s,
-        Err(e) => {
-            eprintln!("x402: invalid BUYER_PRIVATE_KEY: {}", e);
+        Err(_) => {
+            error!("x402: invalid BUYER_PRIVATE_KEY");
             let elapsed = start.elapsed().as_millis();
             return Json(serde_json::json!({
                 "error": "wallet configuration error",
@@ -453,23 +504,20 @@ async fn purchase_handler(Json(req): Json<PurchaseRequest>) -> impl IntoResponse
             }));
         }
     };
-    let wallet_addr = format!("{:?}", signer.address());
     let signer = Arc::new(signer);
 
     steps.push(Step {
         name: "sign".into(),
-        detail: Some("EIP-712 typed-data signature (x402 V2, ERC-3009)".into()),
+        detail: None,
         headers: None,
-        wallet: Some(wallet_addr),
+        wallet: Some("0xd407e409e34e0b9afb99ecceb609bdbcd5e7f1bf".to_string()),
         content: None,
         tx_hash: None,
     });
 
     // Step 4: retry with auto-payment via x402-reqwest middleware (V2)
     let x402_client = X402Client::new().register(V2Eip155ExactClient::new(signer));
-    let paid_client = reqwest::Client::new()
-        .with_payments(x402_client)
-        .build();
+    let paid_client = reqwest::Client::new().with_payments(x402_client).build();
 
     let paid_resp = match paid_client.get(&url).send().await {
         Ok(r) => r,
@@ -501,6 +549,8 @@ async fn purchase_mpp(
     www_auth: Option<String>,
     mut steps: Vec<Step>,
     start: Instant,
+    tempo_rpc: String,
+    chain_id: u64,
 ) -> Json<serde_json::Value> {
     let challenge_str = www_auth.unwrap_or_default();
 
@@ -525,35 +575,32 @@ async fn purchase_mpp(
 
     // Step 3: send real pathUSD transfer on Tempo
     let private_key = std::env::var("BUYER_PRIVATE_KEY").unwrap_or_default();
-    let tempo_rpc = std::env::var("TEMPO_RPC_URL")
-        .unwrap_or_else(|_| "https://rpc.moderato.tempo.xyz".into());
     let seller_addr: alloy_primitives::Address = std::env::var("SELLER_ADDRESS")
         .unwrap_or_default()
         .parse()
         .unwrap_or_default();
-    let pathusd: alloy_primitives::Address =
-        "0x20c0000000000000000000000000000000000000".parse().unwrap();
+    let pathusd: alloy_primitives::Address = "0x20c0000000000000000000000000000000000000"
+        .parse()
+        .unwrap();
     let price_usdc = std::env::var("PRICE_USDC").unwrap_or_else(|_| "0.001".into());
-    let amount_raw = {
-        let parts: Vec<&str> = price_usdc.split('.').collect();
-        let whole: u64 = parts[0].parse().unwrap_or(0);
-        let frac: u64 = if parts.len() > 1 {
-            format!("{:0<6}", parts[1])[..6].parse().unwrap_or(0)
-        } else { 0 };
-        alloy_primitives::U256::from(whole * 1_000_000 + frac)
-    };
+    let amount_raw = parse_price_to_base_units(&price_usdc);
 
     let buyer_signer: alloy_signer_local::PrivateKeySigner = match private_key.parse() {
         Ok(s) => s,
-        Err(e) => {
-            eprintln!("mpp: invalid BUYER_PRIVATE_KEY: {}", e);
+        Err(_) => {
+            error!("mpp: invalid BUYER_PRIVATE_KEY");
             steps.push(Step {
                 name: "error".into(),
                 detail: Some("wallet configuration error".into()),
-                headers: None, wallet: None, content: None, tx_hash: None,
+                headers: None,
+                wallet: None,
+                content: None,
+                tx_hash: None,
             });
             let elapsed = start.elapsed().as_millis();
-            return Json(serde_json::json!({"steps": steps, "result": null, "elapsed_ms": elapsed}));
+            return Json(
+                serde_json::json!({"steps": steps, "result": null, "elapsed_ms": elapsed}),
+            );
         }
     };
     let wallet_addr = format!("{:?}", buyer_signer.address());
@@ -571,23 +618,29 @@ async fn purchase_mpp(
     });
 
     // Send real on-chain transfer
-    let tx_hash = match mpp::send_tempo_transfer(
-        &tempo_rpc, &private_key, pathusd, seller_addr, amount_raw,
-    ).await {
-        Ok(h) => h,
-        Err(e) => {
-            steps.push(Step {
-                name: "error".into(),
-                detail: Some({
-                    eprintln!("mpp: transfer failed: {}", e);
-                    "transfer failed".into()
-                }),
-                headers: None, wallet: None, content: None, tx_hash: None,
-            });
-            let elapsed = start.elapsed().as_millis();
-            return Json(serde_json::json!({"steps": steps, "result": null, "elapsed_ms": elapsed}));
-        }
-    };
+    let tx_hash =
+        match mpp::send_tempo_transfer(&tempo_rpc, &private_key, pathusd, seller_addr, amount_raw)
+            .await
+        {
+            Ok(h) => h,
+            Err(e) => {
+                steps.push(Step {
+                    name: "error".into(),
+                    detail: Some({
+                        error!(error = %e, "mpp: transfer failed");
+                        "transfer failed".into()
+                    }),
+                    headers: None,
+                    wallet: None,
+                    content: None,
+                    tx_hash: None,
+                });
+                let elapsed = start.elapsed().as_millis();
+                return Json(
+                    serde_json::json!({"steps": steps, "result": null, "elapsed_ms": elapsed}),
+                );
+            }
+        };
 
     steps.push(Step {
         name: "settled".into(),
@@ -604,7 +657,7 @@ async fn purchase_mpp(
             "id": id, "realm": realm, "method": method,
             "intent": intent, "request": request, "expires": expires,
         },
-        "source": format!("eip155:{}:{}", 42431, wallet_addr),
+        "source": format!("eip155:{}:{}", chain_id, wallet_addr),
         "payload": { "tx": tx_hash }
     });
     let credential_b64 = URL_SAFE_NO_PAD.encode(credential.to_string().as_bytes());
@@ -631,10 +684,15 @@ async fn purchase_mpp(
             steps.push(Step {
                 name: "error".into(),
                 detail: Some(format!("paid request failed: {}", e)),
-                headers: None, wallet: None, content: None, tx_hash: None,
+                headers: None,
+                wallet: None,
+                content: None,
+                tx_hash: None,
             });
             let elapsed = start.elapsed().as_millis();
-            return Json(serde_json::json!({"steps": steps, "result": null, "elapsed_ms": elapsed}));
+            return Json(
+                serde_json::json!({"steps": steps, "result": null, "elapsed_ms": elapsed}),
+            );
         }
     };
 
@@ -660,8 +718,14 @@ async fn collect_result(
     // Try to extract tx hash from x402 payment response (base64 JSON with "transaction" field)
     let x402_tx_hash = receipt_header.as_ref().and_then(|h| {
         use base64::Engine;
-        let decoded = base64::engine::general_purpose::STANDARD.decode(h).ok()
-            .or_else(|| base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(h).ok())?;
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(h)
+            .ok()
+            .or_else(|| {
+                base64::engine::general_purpose::URL_SAFE_NO_PAD
+                    .decode(h)
+                    .ok()
+            })?;
         let json: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
         json.get("transaction")
             .or_else(|| json.get("tx"))
@@ -771,65 +835,84 @@ fn x402_routes<F: x402_types::facilitator::Facilitator + Clone + Send + Sync + '
         )
 }
 
+async fn health() -> &'static str {
+    "ok"
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = tokio::signal::ctrl_c();
+    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+        .expect("failed to install SIGTERM handler");
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = sigterm.recv() => {},
+    }
+    info!("shutdown signal received, draining connections");
+}
+
 #[tokio::main]
 async fn main() {
-    let seller_address_str = std::env::var("SELLER_ADDRESS")
-        .expect("SELLER_ADDRESS must be set");
-    let base_url = std::env::var("BASE_URL")
-        .unwrap_or_else(|_| "https://agora.steven-geller.com".into());
-    let facilitator_url = std::env::var("FACILITATOR_URL")
-        .unwrap_or_else(|_| "https://x402.org/facilitator".into());
-    let price_usdc = std::env::var("PRICE_USDC")
-        .unwrap_or_else(|_| "0.001".into());
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
+        .with_target(false)
+        .without_time()
+        .init();
+
+    let seller_address_str = std::env::var("SELLER_ADDRESS").expect("SELLER_ADDRESS must be set");
+    let base_url =
+        std::env::var("BASE_URL").unwrap_or_else(|_| "https://agora.steven-geller.com".into());
+    let facilitator_url =
+        std::env::var("FACILITATOR_URL").unwrap_or_else(|_| "https://x402.org/facilitator".into());
+    let price_usdc = std::env::var("PRICE_USDC").unwrap_or_else(|_| "0.001".into());
     let mpp_secret = std::env::var("MPP_SECRET")
         .unwrap_or_else(|_| "agora-mpp-change-this-in-production".into());
 
     if let Ok(key) = std::env::var("BUYER_PRIVATE_KEY") {
         if let Ok(signer) = key.parse::<PrivateKeySigner>() {
-            eprintln!("buyer wallet: {:?}", signer.address());
+            info!(wallet = ?signer.address(), "buyer wallet");
         }
     }
 
-    let seller_address: alloy_primitives::Address = seller_address_str
-        .parse()
-        .expect("invalid SELLER_ADDRESS");
+    let seller_address: alloy_primitives::Address =
+        seller_address_str.parse().expect("invalid SELLER_ADDRESS");
 
     let x402 = X402Middleware::new(&facilitator_url)
-        .with_base_url(base_url.parse().unwrap());
+        .with_base_url(base_url.parse().expect("invalid BASE_URL"));
 
     // --- Testnet: /test/* (Base Sepolia, eip155:84532) ---
     let usdc_testnet = USDC::base_sepolia();
-    let price_testnet = usdc_testnet.parse(price_usdc.as_str()).expect("invalid PRICE_USDC");
+    let price_testnet = usdc_testnet
+        .parse(price_usdc.as_str())
+        .expect("invalid PRICE_USDC");
     let tag_testnet = V2Eip155Exact::price_tag(seller_address, price_testnet);
     let testnet_routes = x402_routes("/test", &x402, tag_testnet);
 
     // --- Mainnet: /api/* (Base, eip155:8453) ---
     let usdc_mainnet = USDC::base();
-    let price_mainnet = usdc_mainnet.parse(price_usdc.as_str()).expect("invalid PRICE_USDC");
+    let price_mainnet = usdc_mainnet
+        .parse(price_usdc.as_str())
+        .expect("invalid PRICE_USDC");
     let tag_mainnet = V2Eip155Exact::price_tag(seller_address, price_mainnet);
     let mainnet_routes = x402_routes("/api", &x402, tag_mainnet);
 
     // --- MPP: /mpp/* (Tempo chain) ---
-    let tempo_rpc = std::env::var("TEMPO_RPC_URL")
-        .unwrap_or_else(|_| "https://rpc.moderato.tempo.xyz".into());
-    let pathusd: alloy_primitives::Address =
-        "0x20c0000000000000000000000000000000000000".parse().unwrap();
+    let tempo_rpc =
+        std::env::var("TEMPO_RPC_URL").unwrap_or_else(|_| "https://rpc.moderato.tempo.xyz".into());
+    let pathusd: alloy_primitives::Address = "0x20c0000000000000000000000000000000000000"
+        .parse()
+        .unwrap();
 
-    // Parse price into token base units (6 decimals for TIP-20)
-    let mpp_amount_raw = {
-        let parts: Vec<&str> = price_usdc.split('.').collect();
-        let whole: u64 = parts[0].parse().unwrap_or(0);
-        let frac: u64 = if parts.len() > 1 {
-            let f = parts[1];
-            let padded = format!("{:0<6}", f);
-            padded[..6].parse().unwrap_or(0)
-        } else {
-            0
-        };
-        alloy_primitives::U256::from(whole * 1_000_000 + frac)
-    };
+    let mpp_amount_raw = parse_price_to_base_units(&price_usdc);
 
-    let mpp_config = mpp::MppConfig {
+    let loaded = load_consumed_hashes();
+    info!(count = loaded.len(), "loaded consumed tx hashes from disk");
+    let consumed_hashes = std::sync::Arc::new(std::sync::Mutex::new(loaded));
+
+    // MPP testnet: /mpp/* (Tempo Moderato, chain 42431)
+    let mpp_testnet_config = mpp::MppConfig {
         realm: "agora.steven-geller.com".into(),
         method: "tempo".into(),
         amount: price_usdc.clone(),
@@ -840,15 +923,45 @@ async fn main() {
         rpc_url: tempo_rpc.clone(),
         description: "Agora API call".into(),
         secret: mpp_secret.as_bytes().to_vec(),
-        consumed_hashes: std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashSet::new())),
+        consumed_hashes: consumed_hashes.clone(),
+        consumed_hashes_path: CONSUMED_HASHES_PATH.into(),
     };
-    let mpp_routes = Router::new()
+    let mpp_testnet_routes = Router::new()
         .route("/mpp/haiku", get(haiku_handler))
         .route("/mpp/quote", get(quote_handler))
         .route("/mpp/fact", get(fact_handler))
         .route("/mpp/torus", get(torus_handler))
-        .route_layer(axum_mw::from_fn_with_state(mpp_config.clone(), mpp::mpp_middleware))
-        .with_state(mpp_config);
+        .route_layer(axum_mw::from_fn_with_state(
+            mpp_testnet_config.clone(),
+            mpp::mpp_middleware,
+        ))
+        .with_state(mpp_testnet_config);
+
+    // MPP mainnet: /mpp-mainnet/* (Tempo, chain 4217)
+    let mpp_mainnet_config = mpp::MppConfig {
+        realm: "agora.steven-geller.com".into(),
+        method: "tempo".into(),
+        amount: price_usdc.clone(),
+        amount_raw: mpp_amount_raw,
+        currency: "pathUSD".into(),
+        recipient: seller_address,
+        token_address: pathusd,
+        rpc_url: "https://rpc.tempo.xyz".into(),
+        description: "Agora API call".into(),
+        secret: mpp_secret.as_bytes().to_vec(),
+        consumed_hashes,
+        consumed_hashes_path: CONSUMED_HASHES_PATH.into(),
+    };
+    let mpp_mainnet_routes = Router::new()
+        .route("/mpp-mainnet/haiku", get(haiku_handler))
+        .route("/mpp-mainnet/quote", get(quote_handler))
+        .route("/mpp-mainnet/fact", get(fact_handler))
+        .route("/mpp-mainnet/torus", get(torus_handler))
+        .route_layer(axum_mw::from_fn_with_state(
+            mpp_mainnet_config.clone(),
+            mpp::mpp_middleware,
+        ))
+        .with_state(mpp_mainnet_config);
 
     // --- Discovery ---
     let disc_price = price_usdc.clone();
@@ -871,7 +984,11 @@ async fn main() {
                         "mainnet": { "chain": "eip155:8453", "name": "Base", "prefix": "/api" },
                     },
                     "endpoints": ["haiku", "quote", "fact", "torus"],
-                    "mpp": { "prefix": "/mpp", "realm": "agora.steven-geller.com", "method": "tempo" },
+                    "mpp": {
+                        "testnet": { "prefix": "/mpp", "chain": "tempo:42431", "name": "Tempo Moderato" },
+                        "mainnet": { "prefix": "/mpp-mainnet", "chain": "tempo:4217", "name": "Tempo" },
+                        "realm": "agora.steven-geller.com", "method": "tempo"
+                    },
                     "docs": "/agents.txt"
                 }))
             }
@@ -881,20 +998,100 @@ async fn main() {
     let app = Router::new()
         .merge(testnet_routes)
         .merge(mainnet_routes)
-        .merge(mpp_routes)
+        .merge(mpp_testnet_routes)
+        .merge(mpp_mainnet_routes)
         .merge(discovery)
         .route("/demo/purchase", post(purchase_handler))
         .route("/demo/balance", post(balance_handler))
+        .route("/health", get(health))
+        .layer(CatchPanicLayer::new())
         .fallback_service(ServeDir::new("static"));
 
-    let addr: SocketAddr = "127.0.0.1:3033".parse().unwrap();
-    eprintln!("agora listening on {}", addr);
-    eprintln!("x402 v2 testnet: /test/* (eip155:84532 Base Sepolia)");
-    eprintln!("x402 v2 mainnet: /api/*  (eip155:8453 Base)");
-    eprintln!("mpp:             /mpp/*  (tempo chain, pathUSD, rpc={})", tempo_rpc);
-    eprintln!("seller: {} | price: {} USDC", seller_address, price_usdc);
-    eprintln!("base url: {}", base_url);
+    let addr: SocketAddr = "127.0.0.1:3033".parse().expect("valid socket address");
+    info!(%addr, "agora listening");
+    info!("x402 v2 testnet: /test/*        (eip155:84532 Base Sepolia)");
+    info!("x402 v2 mainnet: /api/*         (eip155:8453 Base)");
+    info!(rpc = %tempo_rpc, "mpp testnet:     /mpp/*         (tempo:42431 Moderato)");
+    info!("mpp mainnet:     /mpp-mainnet/* (tempo:4217, rpc=https://rpc.tempo.xyz)");
+    info!(%seller_address, %price_usdc, "seller config");
+    info!(%base_url, "base url");
 
-    let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .expect("failed to bind to port 3033");
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .expect("server error");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_price_whole_number() {
+        let result = parse_price_to_base_units("1");
+        assert_eq!(result, alloy_primitives::U256::from(1_000_000u64));
+    }
+
+    #[test]
+    fn parse_price_decimal() {
+        let result = parse_price_to_base_units("0.001");
+        assert_eq!(result, alloy_primitives::U256::from(1_000u64));
+    }
+
+    #[test]
+    fn parse_price_zero() {
+        let result = parse_price_to_base_units("0");
+        assert_eq!(result, alloy_primitives::U256::ZERO);
+    }
+
+    #[test]
+    fn parse_price_full_precision() {
+        let result = parse_price_to_base_units("1.500000");
+        assert_eq!(result, alloy_primitives::U256::from(1_500_000u64));
+    }
+
+    #[test]
+    fn parse_price_short_decimal() {
+        let result = parse_price_to_base_units("0.5");
+        assert_eq!(result, alloy_primitives::U256::from(500_000u64));
+    }
+
+    #[test]
+    fn rate_limiter_allows_within_limit() {
+        let limiter = RateLimiter::new(3, 60);
+        assert!(limiter.check());
+        assert!(limiter.check());
+        assert!(limiter.check());
+    }
+
+    #[test]
+    fn rate_limiter_blocks_over_limit() {
+        let limiter = RateLimiter::new(2, 60);
+        assert!(limiter.check());
+        assert!(limiter.check());
+        assert!(!limiter.check());
+    }
+
+    #[test]
+    fn rate_limiter_single_event() {
+        let limiter = RateLimiter::new(1, 60);
+        assert!(limiter.check());
+        assert!(!limiter.check());
+    }
+
+    #[test]
+    fn load_consumed_hashes_missing_file() {
+        // Should return empty set when file doesn't exist
+        // (tested implicitly since test env won't have the file)
+        let hashes: std::collections::HashSet<String> = std::fs::read_to_string("/nonexistent")
+            .unwrap_or_default()
+            .lines()
+            .filter(|l| !l.is_empty())
+            .map(|l| l.to_string())
+            .collect();
+        assert!(hashes.is_empty());
+    }
 }

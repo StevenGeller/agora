@@ -5,6 +5,9 @@
 .env
 !.env.example
 
+# Runtime data
+consumed_hashes.dat
+
 # OS files
 .DS_Store
 Thumbs.db

@@ -2,6 +2,9 @@
 name = "agora"
 version = "0.2.0"
 edition = "2021"
+description = "Paid API sampler comparing x402 and MPP payment protocols"
+license = "MIT"
+repository = "https://github.com/StevenGeller/agora"
 
 [dependencies]
 axum = "0.8"
@@ -10,7 +13,9 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.13", features = ["json"] }
 reqwest-middleware = "0.5"
-tower-http = { version = "0.6", features = ["fs"] }
+tower-http = { version = "0.6", features = ["fs", "catch-panic"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rand = "0.8"
 base64 = "0.22"
 hmac = "0.12"

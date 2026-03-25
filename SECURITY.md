@@ -38,7 +38,7 @@ For systemd deployments, set variables in the service unit file rather than `.en
 
 ### Replay Protection
 
-- **MPP**: Tracks consumed transaction hashes in an in-memory `HashSet`. Each tx hash can only be used once. If the server restarts, the set resets (acceptable for testnet, should be persisted for mainnet).
+- **MPP**: Tracks consumed transaction hashes in a `HashSet` with disk persistence (`consumed_hashes.dat`). Each tx hash can only be used once. Hashes are loaded on startup and appended on each verified payment, so replay protection survives restarts.
 - **x402**: Replay protection is handled by the facilitator and the ERC-3009 nonce mechanism.
 
 ### Rate Limiting
@@ -52,7 +52,7 @@ For systemd deployments, set variables in the service unit file rather than `.en
 - SVG responses from the Torus endpoint are sanitized client-side (allowlisted elements, event handlers stripped)
 - All user-facing text is escaped before DOM insertion (`textContent` based escaping)
 - No user input is interpolated into SQL, shell commands, or server-side templates
-- Internal error details (RPC URLs, private key parse errors) are logged to stderr but never returned to clients
+- Internal error details (RPC URLs, private key parse errors) are logged via structured tracing but never returned to clients
 
 ## Testnet vs Mainnet
 

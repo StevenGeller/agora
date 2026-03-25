@@ -57,11 +57,19 @@ The server returns a 402 with a standard `WWW-Authenticate: Payment` header cont
     └──────────────────┘ └──────────────────┘ └──────────────────┘
 ```
 
-**`src/main.rs`** — Axum server, x402 middleware integration, demo buyer proxy, content endpoints, rate limiting
+**`src/main.rs`** — Axum server, x402 middleware integration, demo buyer proxy, content endpoints, rate limiting, health checks, graceful shutdown
 
-**`src/mpp.rs`** — MPP protocol: HMAC-bound challenge generation via `WWW-Authenticate: Payment`, credential verification via `Authorization: Payment`, on-chain receipt validation, RLP-encoded Tempo transactions
+**`src/mpp.rs`** — MPP protocol: HMAC-bound challenge generation via `WWW-Authenticate: Payment`, credential verification via `Authorization: Payment`, on-chain receipt validation, RLP-encoded Tempo transactions, disk-persisted replay protection
 
 **`static/`** — Single-page frontend with step-by-step flow visualization
+
+### Operational
+
+- **Structured logging** via `tracing` with `RUST_LOG` env filter (default: `info`)
+- **Health endpoint** at `GET /health` for monitoring and reverse proxy checks
+- **Graceful shutdown** on SIGTERM/SIGINT with in-flight request draining
+- **Panic recovery** via `CatchPanicLayer` — handler panics return 500 instead of dropping connections
+- **CI** via GitHub Actions (clippy, rustfmt, build)
 
 ## Setup
 

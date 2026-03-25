@@ -15,6 +15,7 @@ use hmac::{Hmac, Mac};
 use sha2::Sha256;
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
+use tracing::{error, info, warn};
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -27,15 +28,16 @@ const TRANSFER_EVENT_SIG: &str =
 pub struct MppConfig {
     pub realm: String,
     pub method: String,
-    pub amount: String,          // human-readable, e.g. "0.001"
-    pub amount_raw: U256,        // in token base units (6 decimals)
+    pub amount: String,   // human-readable, e.g. "0.001"
+    pub amount_raw: U256, // in token base units (6 decimals)
     pub currency: String,
     pub recipient: Address,
-    pub token_address: Address,  // pathUSD on Tempo
-    pub rpc_url: String,         // Tempo RPC endpoint
+    pub token_address: Address, // pathUSD on Tempo
+    pub rpc_url: String,        // Tempo RPC endpoint
     pub description: String,
     pub secret: Vec<u8>,
     pub consumed_hashes: Arc<Mutex<HashSet<String>>>,
+    pub consumed_hashes_path: String, // disk persistence for replay protection
 }
 
 /// Build the base64url-encoded `request` parameter for the challenge.
@@ -57,7 +59,10 @@ fn compute_challenge_id(
     request_b64: &str,
     expires: &str,
 ) -> String {
-    let input = format!("{}|{}|{}|{}|{}||", realm, method, intent, request_b64, expires);
+    let input = format!(
+        "{}|{}|{}|{}|{}||",
+        realm, method, intent, request_b64, expires
+    );
     let mut mac = HmacSha256::new_from_slice(secret).expect("HMAC key");
     mac.update(input.as_bytes());
     let result = mac.finalize();
@@ -115,11 +120,26 @@ pub async fn verify_credential(config: &MppConfig, auth_header: &str) -> bool {
         None => return false,
     };
     let id = challenge.get("id").and_then(|v| v.as_str()).unwrap_or("");
-    let realm = challenge.get("realm").and_then(|v| v.as_str()).unwrap_or("");
-    let method = challenge.get("method").and_then(|v| v.as_str()).unwrap_or("");
-    let intent = challenge.get("intent").and_then(|v| v.as_str()).unwrap_or("");
-    let request = challenge.get("request").and_then(|v| v.as_str()).unwrap_or("");
-    let expires = challenge.get("expires").and_then(|v| v.as_str()).unwrap_or("");
+    let realm = challenge
+        .get("realm")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let method = challenge
+        .get("method")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let intent = challenge
+        .get("intent")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let request = challenge
+        .get("request")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let expires = challenge
+        .get("expires")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
 
     // Constant-time HMAC verification (prevents timing attacks)
     let input = format!("{}|{}|{}|{}|{}||", realm, method, intent, request, expires);
@@ -128,19 +148,19 @@ pub async fn verify_credential(config: &MppConfig, auth_header: &str) -> bool {
     let provided_bytes = match URL_SAFE_NO_PAD.decode(id) {
         Ok(b) => b,
         Err(_) => {
-            eprintln!("mpp: invalid challenge ID encoding");
+            warn!("mpp: invalid challenge ID encoding");
             return false;
         }
     };
     if mac.verify_slice(&provided_bytes).is_err() {
-        eprintln!("mpp: challenge ID mismatch");
+        warn!("mpp: challenge ID mismatch");
         return false;
     }
 
     // 2. Check expiry
     if let Ok(exp) = chrono::DateTime::parse_from_rfc3339(expires) {
         if exp < chrono::Utc::now() {
-            eprintln!("mpp: challenge expired");
+            warn!("mpp: challenge expired");
             return false;
         }
     }
@@ -149,14 +169,14 @@ pub async fn verify_credential(config: &MppConfig, auth_header: &str) -> bool {
     let payload = match cred.get("payload") {
         Some(p) => p,
         None => {
-            eprintln!("mpp: no payload in credential");
+            warn!("mpp: no payload in credential");
             return false;
         }
     };
     let tx_hash = match payload.get("tx").and_then(|v| v.as_str()) {
         Some(h) => h.to_string(),
         None => {
-            eprintln!("mpp: no tx hash in payload");
+            warn!("mpp: no tx hash in payload");
             return false;
         }
     };
@@ -165,7 +185,7 @@ pub async fn verify_credential(config: &MppConfig, auth_header: &str) -> bool {
     {
         let consumed = config.consumed_hashes.lock().unwrap();
         if consumed.contains(&tx_hash) {
-            eprintln!("mpp: replayed tx {}", tx_hash);
+            warn!(tx = %tx_hash, "mpp: replayed tx");
             return false;
         }
     }
@@ -173,17 +193,24 @@ pub async fn verify_credential(config: &MppConfig, auth_header: &str) -> bool {
     // 5. Verify the transaction on Tempo chain
     match verify_tempo_tx(config, &tx_hash).await {
         Ok(true) => {
-            // Mark tx as consumed only after successful verification
+            // Persist to disk before inserting (tx_hash moves on insert)
+            if let Ok(mut f) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&config.consumed_hashes_path)
+            {
+                let _ = std::io::Write::write_fmt(&mut f, format_args!("{}\n", tx_hash));
+            }
             let mut consumed = config.consumed_hashes.lock().unwrap();
             consumed.insert(tx_hash);
             true
         }
         Ok(false) => {
-            eprintln!("mpp: tx verification failed for {}", tx_hash);
+            warn!(tx = %tx_hash, "mpp: tx verification failed");
             false
         }
         Err(e) => {
-            eprintln!("mpp: tx verification error: {}", e);
+            error!(error = %e, "mpp: tx verification error");
             false
         }
     }
@@ -273,10 +300,7 @@ async fn verify_tempo_tx(config: &MppConfig, tx_hash: &str) -> Result<bool, Stri
         let amount = U256::from_str_radix(data.trim_start_matches("0x"), 16).unwrap_or(U256::ZERO);
 
         if amount >= config.amount_raw {
-            eprintln!(
-                "mpp: verified tx {} — {} pathUSD to {:?}",
-                tx_hash, amount, config.recipient
-            );
+            info!(tx = %tx_hash, amount = %amount, to = ?config.recipient, "mpp: verified tx");
             return Ok(true);
         }
     }
@@ -317,10 +341,8 @@ pub async fn mpp_middleware(
 
                 let mut resp = next.run(req).await;
                 let receipt = build_receipt(&config, &tx_hash);
-                resp.headers_mut().insert(
-                    "payment-receipt",
-                    receipt.parse().unwrap(),
-                );
+                resp.headers_mut()
+                    .insert("payment-receipt", receipt.parse().unwrap());
                 return resp;
             }
         }
@@ -365,9 +387,13 @@ pub async fn send_tempo_transfer(
     let client = reqwest::Client::new();
 
     // 1. Get nonce
-    let nonce = json_rpc_call(&client, rpc_url, "eth_getTransactionCount",
-        serde_json::json!([format!("{:?}", from), "latest"]))
-        .await?;
+    let nonce = json_rpc_call(
+        &client,
+        rpc_url,
+        "eth_getTransactionCount",
+        serde_json::json!([format!("{:?}", from), "latest"]),
+    )
+    .await?;
     let nonce = u64::from_str_radix(
         nonce.as_str().ok_or("bad nonce")?.trim_start_matches("0x"),
         16,
@@ -375,10 +401,12 @@ pub async fn send_tempo_transfer(
     .map_err(|e| format!("nonce parse: {}", e))?;
 
     // 2. Get gas price
-    let gas_price = json_rpc_call(&client, rpc_url, "eth_gasPrice", serde_json::json!([]))
-        .await?;
+    let gas_price = json_rpc_call(&client, rpc_url, "eth_gasPrice", serde_json::json!([])).await?;
     let gas_price = U256::from_str_radix(
-        gas_price.as_str().ok_or("bad gas")?.trim_start_matches("0x"),
+        gas_price
+            .as_str()
+            .ok_or("bad gas")?
+            .trim_start_matches("0x"),
         16,
     )
     .unwrap_or(U256::from(1_000_000_000u64)); // 1 gwei fallback
@@ -394,10 +422,13 @@ pub async fn send_tempo_transfer(
     calldata.extend_from_slice(&amount_bytes);
 
     // 4. Get chain ID
-    let chain_id_hex = json_rpc_call(&client, rpc_url, "eth_chainId", serde_json::json!([]))
-        .await?;
+    let chain_id_hex =
+        json_rpc_call(&client, rpc_url, "eth_chainId", serde_json::json!([])).await?;
     let chain_id = u64::from_str_radix(
-        chain_id_hex.as_str().ok_or("bad chain id")?.trim_start_matches("0x"),
+        chain_id_hex
+            .as_str()
+            .ok_or("bad chain id")?
+            .trim_start_matches("0x"),
         16,
     )
     .map_err(|e| format!("chain id parse: {}", e))?;
@@ -451,7 +482,7 @@ pub async fn send_tempo_transfer(
         .ok_or("no tx hash in response")?
         .to_string();
 
-    eprintln!("mpp: sent pathUSD transfer tx {}", hash);
+    info!(tx = %hash, "mpp: sent pathUSD transfer");
 
     // 9. Wait for receipt (poll up to 15 seconds)
     for _ in 0..30 {
@@ -467,7 +498,7 @@ pub async fn send_tempo_transfer(
             if !r.is_null() {
                 let status = r.get("status").and_then(|v| v.as_str()).unwrap_or("0x0");
                 if status == "0x1" {
-                    eprintln!("mpp: tx {} confirmed", hash);
+                    info!(tx = %hash, "mpp: tx confirmed");
                     return Ok(hash);
                 } else {
                     return Err(format!("tx reverted: {}", hash));
@@ -614,6 +645,7 @@ fn encode_legacy_tx_for_signing(
     ])
 }
 
+#[allow(clippy::too_many_arguments)]
 fn encode_signed_legacy_tx(
     nonce: u64,
     gas_price: U256,
@@ -639,4 +671,204 @@ fn encode_signed_legacy_tx(
         rlp_encode_u256(r),
         rlp_encode_u256(s),
     ])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn test_config() -> MppConfig {
+        MppConfig {
+            realm: "test.example.com".into(),
+            method: "tempo".into(),
+            amount: "0.001".into(),
+            amount_raw: U256::from(1000u64),
+            currency: "pathUSD".into(),
+            recipient: "0x1ecED38210cA1335f9FD38399e64d2C77C2D7cF3"
+                .parse()
+                .unwrap(),
+            token_address: "0x20c0000000000000000000000000000000000000"
+                .parse()
+                .unwrap(),
+            rpc_url: "https://rpc.test".into(),
+            description: "Test".into(),
+            secret: b"test-secret-32-bytes-long-enough".to_vec(),
+            consumed_hashes: Arc::new(Mutex::new(HashSet::new())),
+            consumed_hashes_path: "/dev/null".into(),
+        }
+    }
+
+    #[test]
+    fn encode_request_roundtrip() {
+        let addr: Address = "0x1ecED38210cA1335f9FD38399e64d2C77C2D7cF3"
+            .parse()
+            .unwrap();
+        let encoded = encode_request("0.001", "pathUSD", &addr);
+        let decoded = URL_SAFE_NO_PAD.decode(&encoded).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
+        assert_eq!(json["amount"], "0.001");
+        assert_eq!(json["currency"], "pathUSD");
+    }
+
+    #[test]
+    fn challenge_id_deterministic() {
+        let secret = b"test-secret";
+        let id1 = compute_challenge_id(
+            secret,
+            "realm",
+            "method",
+            "charge",
+            "req",
+            "2026-01-01T00:00:00Z",
+        );
+        let id2 = compute_challenge_id(
+            secret,
+            "realm",
+            "method",
+            "charge",
+            "req",
+            "2026-01-01T00:00:00Z",
+        );
+        assert_eq!(id1, id2);
+    }
+
+    #[test]
+    fn challenge_id_varies_with_realm() {
+        let secret = b"test-secret";
+        let id1 = compute_challenge_id(secret, "realm1", "m", "charge", "r", "exp");
+        let id2 = compute_challenge_id(secret, "realm2", "m", "charge", "r", "exp");
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn challenge_id_varies_with_secret() {
+        let id1 = compute_challenge_id(b"secret1", "r", "m", "charge", "r", "exp");
+        let id2 = compute_challenge_id(b"secret2", "r", "m", "charge", "r", "exp");
+        assert_ne!(id1, id2);
+    }
+
+    #[test]
+    fn build_problem_body_format() {
+        let body = build_problem_body();
+        let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(json["status"], 402);
+        assert_eq!(json["title"], "Payment Required");
+    }
+
+    #[test]
+    fn build_challenge_contains_required_fields() {
+        let config = test_config();
+        let challenge = build_challenge(&config);
+        assert!(challenge.contains("realm=\"test.example.com\""));
+        assert!(challenge.contains("method=\"tempo\""));
+        assert!(challenge.contains("intent=\"charge\""));
+        assert!(challenge.contains("expires="));
+        assert!(challenge.contains("request="));
+        assert!(challenge.contains("id="));
+    }
+
+    #[test]
+    fn build_receipt_roundtrip() {
+        let config = test_config();
+        let receipt_b64 = build_receipt(&config, "0xabc123");
+        let decoded = URL_SAFE_NO_PAD.decode(&receipt_b64).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&decoded).unwrap();
+        assert_eq!(json["status"], "settled");
+        assert_eq!(json["tx"], "0xabc123");
+        assert_eq!(json["method"], "tempo");
+        assert_eq!(json["amount"], "0.001");
+        assert_eq!(json["currency"], "pathUSD");
+    }
+
+    #[test]
+    fn extract_tx_hash_valid() {
+        let credential = serde_json::json!({
+            "challenge": {},
+            "payload": { "tx": "0xdeadbeef" }
+        });
+        let b64 = URL_SAFE_NO_PAD.encode(credential.to_string().as_bytes());
+        let header = format!("Payment {}", b64);
+        assert_eq!(extract_tx_hash(&header), Some("0xdeadbeef".to_string()));
+    }
+
+    #[test]
+    fn extract_tx_hash_invalid() {
+        assert_eq!(extract_tx_hash("Payment invalid"), None);
+        assert_eq!(extract_tx_hash("Bearer token"), None);
+    }
+
+    // --- RLP encoding tests ---
+
+    #[test]
+    fn rlp_u64_zero() {
+        assert_eq!(rlp_encode_u64(0), vec![0x80]);
+    }
+
+    #[test]
+    fn rlp_u64_single_byte() {
+        assert_eq!(rlp_encode_u64(1), vec![0x01]);
+        assert_eq!(rlp_encode_u64(127), vec![0x7f]);
+    }
+
+    #[test]
+    fn rlp_u64_two_bytes() {
+        assert_eq!(rlp_encode_u64(128), vec![0x81, 0x80]);
+        assert_eq!(rlp_encode_u64(256), vec![0x82, 0x01, 0x00]);
+    }
+
+    #[test]
+    fn rlp_u256_zero() {
+        assert_eq!(rlp_encode_u256(U256::ZERO), vec![0x80]);
+    }
+
+    #[test]
+    fn rlp_u256_small() {
+        assert_eq!(rlp_encode_u256(U256::from(1u64)), vec![0x01]);
+        assert_eq!(rlp_encode_u256(U256::from(127u64)), vec![0x7f]);
+    }
+
+    #[test]
+    fn rlp_bytes_empty() {
+        assert_eq!(rlp_encode_bytes(&[]), vec![0x80]);
+    }
+
+    #[test]
+    fn rlp_bytes_single_low() {
+        assert_eq!(rlp_encode_bytes(&[0x42]), vec![0x42]);
+    }
+
+    #[test]
+    fn rlp_bytes_single_high() {
+        assert_eq!(rlp_encode_bytes(&[0x80]), vec![0x81, 0x80]);
+    }
+
+    #[test]
+    fn rlp_bytes_multi() {
+        let data = vec![0x01, 0x02, 0x03];
+        let encoded = rlp_encode_bytes(&data);
+        assert_eq!(encoded[0], 0x80 + 3);
+        assert_eq!(&encoded[1..], &[0x01, 0x02, 0x03]);
+    }
+
+    #[test]
+    fn rlp_list_empty() {
+        assert_eq!(rlp_list(&[]), vec![0xc0]);
+    }
+
+    #[test]
+    fn rlp_list_single_item() {
+        let items = vec![rlp_encode_u64(1)]; // [0x01]
+        let result = rlp_list(&items);
+        assert_eq!(result, vec![0xc1, 0x01]);
+    }
+
+    #[test]
+    fn rlp_address_length() {
+        let addr: Address = "0x1ecED38210cA1335f9FD38399e64d2C77C2D7cF3"
+            .parse()
+            .unwrap();
+        let encoded = rlp_encode_address(addr);
+        assert_eq!(encoded.len(), 21); // 1 byte prefix + 20 bytes address
+        assert_eq!(encoded[0], 0x80 + 20);
+    }
 }
